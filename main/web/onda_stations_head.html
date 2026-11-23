@@ -1,0 +1,27 @@
+<!doctype html><html lang='es'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Radios de ONDA</title><style>
+body{font:16px system-ui;
+background:#101a2a;
+color:#f6f3ec;
+margin:0;
+padding:18px}main{max-width:680px;
+margin:auto}h1{color:#86e1bf}button,input,select{font:inherit;
+padding:11px;
+border:0;
+border-radius:9px}button{background:#22344a;
+color:#f6f3ec;
+cursor:pointer}input,select{background:#1a293b;
+color:#f6f3ec}.form,.row,.actions{display:flex;
+gap:8px;
+align-items:center}.form{flex-wrap:wrap;
+margin:14px 0}.form input{flex:1;
+min-width:180px}.row{background:#1a293b;
+margin:9px 0;
+padding:12px;
+border-radius:12px;
+justify-content:space-between}.meta{color:#a9b5c5;
+ font-size:13px}.row>div:first-child{min-width:0;overflow-wrap:anywhere}
+.name{font-weight:700}.actions{flex-wrap:wrap}
+@media(max-width:420px){.row{flex-wrap:wrap}.actions{width:100%}}
+#status{color:#a9b5c5;
+min-height:22px}a{color:#86e1bf}
+</style><main><h1>Radios de ONDA</h1><p>Buscá emisoras MP3 o AAC/AAC+. Las favoritas quedan guardadas en la radio.</p><p><button id='search-tab'>Buscar</button> <button id='favorite-tab'>Favoritas</button> <a href='/'>Configurar Wi-Fi</a> <button id='logout'>Cerrar sesión</button></p><section id='search-panel'><div class='form'><select id='filter'><option value='name'>Nombre</option><option value='country'>País</option><option value='tag'>Género</option><option value='language'>Idioma</option></select><select id='codec'><option value='MP3'>MP3</option><option value='AAC'>AAC / AAC+</option></select><input id='query' maxlength='64' placeholder='Ej.: Argentina, jazz, español'><button id='search'>Buscar</button></div></section><p id='status' aria-live='polite'></p><section id='results'></section><button id='cancel-search' hidden>Cancelar búsqueda</button> <button id='more' hidden>Cargar 20 más</button></main>

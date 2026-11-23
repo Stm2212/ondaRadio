@@ -1,0 +1,17 @@
+menu "ONDA integration-test hooks"
+
+config ONDA_STATION_SEARCH_TEST_ENDPOINT
+    bool "Use a local station-search endpoint (integration tests only)"
+    default n
+    help
+        Route station searches to a local HTTP mock service for hardware
+        integration testing. Release builds reject this option.
+
+config ONDA_STATION_SEARCH_TEST_ENDPOINT_URL
+    string "Local station-search endpoint URL"
+    depends on ONDA_STATION_SEARCH_TEST_ENDPOINT
+    default "http://192.168.1.2:8088/json/stations/search"
+    help
+        Complete HTTP URL of the test host reachable from the ESP32-S3.
+
+endmenu

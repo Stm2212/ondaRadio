@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="es">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8">
+<title>Configurar ONDA</title>
+<style>
+body{font:17px system-ui;background:#10141a;color:#eff4f8;margin:0;padding:24px}
+main{max-width:420px;margin:8vh auto;background:#202833;padding:24px;border-radius:18px}
+h1{color:#ffbf69;font-size:25px}
+label{display:block;margin:18px 0 6px}
+input,select{box-sizing:border-box;width:100%;padding:13px;border-radius:10px;border:1px solid #657080;background:#10141a;color:#fff;font-size:17px}
+input[type=checkbox]{width:auto;margin-right:8px}
+button{padding:13px;margin-top:8px;border:0;border-radius:10px;background:#ffbf69;font-size:17px;font-weight:700}
+[hidden]{display:none!important}
+</style>
+<main>
+<p id="portal-status" aria-live="polite">Abriendo el portal local…</p>
+<button id="reopen" type="button" hidden>Volver a abrir el portal</button>
+
+<section id="portal-content" hidden>
+<h1>Conectar ONDA a Wi-Fi</h1>
+<button id="logout" type="button">Cerrar sesión</button>
+<p>Elegí la red de tu casa y escribí su contraseña. La radio guardará estos datos para conectarse automáticamente cuando la enciendas. Solo admite redes de 2,4 GHz.</p>
+<form id="wifi-form">
+<label for="network">Redes detectadas</label>
+<div style="display:flex;gap:8px">
+<select id="network" style="flex:1;min-width:0"><option value="">Buscando redes…</option></select>
+<button id="refresh" type="button">Actualizar</button>
+</div>
+<div id="manual-wrap" hidden>
+<label for="manual-ssid">Si no aparece, escribí el nombre de la red</label>
+<input id="manual-ssid" maxlength="32" autocomplete="off">
+</div>
+<input id="ssid" type="hidden">
+<input id="authmode" type="hidden" value="-1">
+<label for="wifi-password">Contraseña de la red Wi-Fi</label>
+<input id="wifi-password" type="password" maxlength="64" autocomplete="new-password">
+<label><input id="wifi-password-visible" type="checkbox"> Mostrar contraseña</label>
+<button id="wifi-submit" type="submit" style="width:100%;margin-top:22px">Guardar y conectar</button>
+</form>
+<p id="scan-status" aria-live="polite"></p>
+<p><a style="color:#86e1bf" href="/radios">Buscar emisoras y administrar favoritas</a></p>
+</section>
+</main>
+<script>
+let csrfToken='';
+const pick=document.getElementById('network');
+const manual=document.getElementById('manual-wrap');
+const manualSsid=document.getElementById('manual-ssid');
+const scanStatus=document.getElementById('scan-status');
+const portalStatus=document.getElementById('portal-status');
+const reopen=document.getElementById('reopen');
+document.getElementById('wifi-password-visible').addEventListener('change',event=>{
+  document.getElementById('wifi-password').type=event.target.checked?'text':'password';
+});
+
+async function scan(){
+  pick.innerHTML='';
+  const wait=document.createElement('option');
+  wait.textContent='Buscando…';
+  pick.append(wait);
+  document.getElementById('refresh').disabled=true;
+  try{
+    const response=await fetch('/scan',{cache:'no-store'});
+    if(!response.ok)throw new Error('scan');
+    const networks=await response.json();
+    pick.innerHTML='';
+    const hint=document.createElement('option');
+    hint.value='';
+    hint.textContent=networks.length?'Elegí una red':'No se detectaron redes';
+    pick.append(hint);
+    for(const network of networks){
+      const option=document.createElement('option');
+      option.value=network.ssid;
+      option.dataset.authmode=network.authmode;
+      option.textContent=network.ssid+' · '+network.security+' · '+network.rssi+' dBm';
+      pick.append(option);
+    }
+    const other=document.createElement('option');
+    other.value='__manual__';
+    other.textContent='Escribir nombre manualmente';
+    pick.append(other);
+    scanStatus.textContent=networks.length?'Redes encontradas: '+networks.length:'Podés ingresar el nombre manualmente.';
+  }catch(e){
+    pick.innerHTML='';
+    const other=document.createElement('option');
+    other.value='__manual__';
+    other.textContent='Escribir nombre manualmente';
+    pick.append(other);
+    pick.value='__manual__';
+    manual.hidden=false;
+    scanStatus.textContent='No se pudieron buscar redes. Escribí el nombre manualmente.';
+  }finally{
+    document.getElementById('refresh').disabled=false;
+  }
+}
+
+pick.addEventListener('change',()=>{manual.hidden=pick.value!=='__manual__'});
+document.getElementById('refresh').addEventListener('click',scan);
+
+async function openPortal(){
+  portalStatus.textContent='Abriendo el portal local…';
+  try{
+    const response=await fetch('/auth/csrf',{cache:'no-store'});
+    if(!response.ok)throw new Error('auth');
+    const result=await response.json();
+    if(typeof result.csrf!=='string'||!/^[0-9a-f]{32}$/.test(result.csrf))throw new Error('auth');
+    csrfToken=result.csrf;
+    portalStatus.hidden=true;
+    reopen.hidden=true;
+    document.getElementById('portal-content').hidden=false;
+    await scan();
+  }catch(e){
+    csrfToken='';
+    portalStatus.hidden=false;
+    portalStatus.textContent='No se pudo abrir el portal. Verificá que el teléfono siga conectado a ONDA.';
+    reopen.hidden=false;
+  }
+}
+
+document.getElementById('logout').addEventListener('click',async()=>{
+  try{
+    const response=await fetch('/auth/logout',{method:'POST',headers:{'X-CSRF-Token':csrfToken}});
+    if(response.status===401){window.location.replace('/');return}
+    if(!response.ok)throw new Error('logout');
+    csrfToken='';
+    document.getElementById('portal-content').hidden=true;
+    portalStatus.hidden=false;
+    portalStatus.textContent='Sesión cerrada. El acceso requiere estar conectado a la red ONDA.';
+    reopen.hidden=false;
+  }catch(e){
+    scanStatus.textContent='No se pudo cerrar la sesión. Intentá de nuevo.';
+  }
+});
+reopen.addEventListener('click',()=>window.location.reload());
+
+let wifiSubmitting=false;
+const wifiSubmit=document.getElementById('wifi-submit');
+document.getElementById('wifi-form').addEventListener('submit',async event=>{
+  event.preventDefault();
+  if(wifiSubmitting)return;
+  const ssid=pick.value==='__manual__'?manualSsid.value:pick.value;
+  if(!ssid.trim()){
+    scanStatus.textContent='Elegí una red o escribí su nombre.';
+    return;
+  }
+  const selectedAuthmode=pick.value==='__manual__'?-1:(pick.selectedOptions[0].dataset.authmode||-1);
+  const password=document.getElementById('wifi-password');
+  const body=new URLSearchParams({ssid,authmode:selectedAuthmode,password:password.value});
+  wifiSubmitting=true;
+  wifiSubmit.disabled=true;
+  try{
+    const response=await fetch('/wifi',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':csrfToken},body});
+    password.value='';
+    if(response.status===401){window.location.replace('/');return}
+    if(!response.ok)throw new Error('wifi');
+    const html=await response.text();
+    document.open();
+    document.write(html);
+    document.close();
+  }catch(e){
+    scanStatus.textContent='No se pudo enviar la configuración. Recargá el portal e intentá otra vez.';
+  }finally{
+    wifiSubmitting=false;
+    wifiSubmit.disabled=false;
+  }
+});
+openPortal();
+</script>
+</html>

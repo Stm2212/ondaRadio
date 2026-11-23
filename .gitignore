@@ -1,0 +1,51 @@
+# ESP-IDF generated output and downloaded dependencies
+/build/
+/build-linux/
+**/build/
+/managed_components/
+**/managed_components/
+**/sdkconfig
+**/sdkconfig.old
+/work/
+/output/
+/outputs/
+/dist/
+/release/
+/release-candidates/
+
+# Python and test-tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage/
+
+# Local logs and generated manifests
+*.log
+/manifest.json
+
+# Local credentials and private keys (keep only deliberately sanitized examples)
+.env
+.env.*
+!.env.example
+**/secrets/
+credentials.json
+**/*.secrets.local.json
+*.pem
+*.p12
+*.pfx
+*.key
+
+# Firmware images and linker output
+*.elf
+*.map
+*.bin
+*.uf2
+
+# Operating-system and editor metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

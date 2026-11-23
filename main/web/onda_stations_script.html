@@ -1,0 +1,265 @@
+<script>
+const status=document.getElementById('status');
+const results=document.getElementById('results');
+const more=document.getElementById('more');
+const cancelButton=document.getElementById('cancel-search');
+let showingFavorites=false,offset=0,filter='',query='',codec='MP3',busy=false,generation=0,csrfToken='',activeSearchId='';
+
+async function getCsrfToken(){
+  if(csrfToken)return csrfToken;
+  const response=await fetch('/auth/csrf',{cache:'no-store'});
+  if(response.status===401){window.location.replace('/');throw new Error('session')}
+  if(!response.ok)throw new Error('session');
+  const data=await response.json();
+  if(typeof data.csrf!=='string')throw new Error('csrf');
+  csrfToken=data.csrf;
+  return csrfToken;
+}
+
+function txt(value){return typeof value==='string'?value:''}
+function delay(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
+
+async function cancelJob(id){
+  if(!id)return;
+  const csrf=await getCsrfToken();
+  const response=await fetch('/stations/search/cancel',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},
+    body:JSON.stringify({id})
+  });
+  if(response.status===401){window.location.replace('/');throw new Error('session')}
+  if(!response.ok&&response.status!==409&&response.status!==404)throw new Error('cancel');
+}
+
+function invalidateSearch(message=''){
+  const oldId=activeSearchId;
+  activeSearchId='';
+  generation++;
+  busy=false;
+  more.disabled=false;
+  cancelButton.hidden=true;
+  if(oldId)cancelJob(oldId).catch(()=>{});
+  if(message)status.textContent=message;
+}
+
+async function waitForMutation(response){
+  if(response.status===401){window.location.replace('/');throw new Error('unauthorized')}
+  if(response.status!==202)throw new Error('mutation-submit');
+  const queued=await response.json();
+  if(typeof queued.id!=='string')throw new Error('mutation-id');
+  for(let attempt=0;attempt<60;attempt++){
+    await new Promise(resolve=>setTimeout(resolve,100));
+    const poll=await fetch('/stations/mutation?id='+encodeURIComponent(queued.id),{cache:'no-store'});
+    if(poll.status===401){window.location.replace('/');throw new Error('unauthorized')}
+    if(!poll.ok)throw new Error('mutation-poll');
+    const result=await poll.json();
+    if(result.state==='done')return result;
+  }
+  throw new Error('mutation-timeout');
+}
+
+function row(station,favorite){
+  let isFavorite=favorite;
+  const box=document.createElement('article');
+  box.className='row';
+  const info=document.createElement('div');
+  const name=document.createElement('div');
+  name.className='name';
+  name.textContent=txt(station.name)||'Radio sin nombre';
+  const meta=document.createElement('div');
+  meta.className='meta';
+  meta.textContent=[txt(station.country),txt(station.codec)].filter(Boolean).join(' · ');
+  info.append(name,meta);
+  box.append(info);
+
+  const actions=document.createElement('div');
+  actions.className='actions';
+  let mutating=false;
+  function setMutating(value){
+    mutating=value;
+    for(const button of actions.querySelectorAll('button'))button.disabled=value;
+  }
+  const save=document.createElement('button');
+  save.textContent=isFavorite?'Quitar favorita':'☆ Favorita';
+  save.onclick=async()=>{
+    if(mutating)return;
+    setMutating(true);
+    try{
+      const data={name:txt(station.name),country:txt(station.country),codec:txt(station.codec),uuid:txt(station.stationuuid||station.uuid),url:txt(station.url_resolved||station.url)};
+      const csrf=await getCsrfToken();
+      const response=await fetch('/stations/favorite',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},
+        body:JSON.stringify(data)
+      });
+      if(response.status===401){window.location.replace('/');return}
+      const result=await waitForMutation(response);
+      if(!result.ok)throw new Error(result.error||'favorite');
+      if(showingFavorites){await favorites();return}
+      isFavorite=!!result.favorite;
+      save.textContent=isFavorite?'Quitar favorita':'☆ Favorita';
+      status.textContent=isFavorite?'Se agregó a favoritas':'Se quitó de favoritas';
+    }catch(error){status.textContent=error.message==='full'?'Se alcanzó el límite de 8 favoritas':'No se pudo guardar la emisora como favorita'}
+    finally{setMutating(false)}
+  };
+  actions.append(save);
+  if(isFavorite){
+    for(const [label,direction] of [['↑',-1],['↓',1]]){
+      const button=document.createElement('button');
+      button.textContent=label;
+      button.setAttribute('aria-label',
+        (direction<0?'Subir ':'Bajar ')+txt(station.name));
+      button.onclick=async()=>{
+        if(mutating)return;
+        setMutating(true);
+        try{
+          const csrf=await getCsrfToken();
+          const response=await fetch('/stations/reorder',{
+            method:'POST',
+            headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},
+            body:JSON.stringify({uuid:txt(station.uuid),direction})
+          });
+          if(response.status===401){window.location.replace('/');return}
+          const result=await waitForMutation(response);
+          if(result.ok)await favorites();
+          else status.textContent=result.error==='edge'?'No se puede mover más en esa dirección':'No se pudo ordenar la lista';
+        }catch(error){status.textContent='No se pudo ordenar la lista de favoritas'}
+        finally{setMutating(false)}
+      };
+      actions.append(button);
+    }
+  }
+  box.append(actions);
+  return box;
+}
+
+function searchTab(){
+  invalidateSearch();
+  showingFavorites=false;
+  document.getElementById('search-panel').hidden=false;
+  results.replaceChildren();
+  more.hidden=true;
+  status.textContent='';
+}
+
+async function pollSearch(id,token){
+  while(token===generation){
+    const response=await fetch('/stations/search?id='+encodeURIComponent(id),{cache:'no-store'});
+    if(response.status===401){window.location.replace('/');throw new Error('session')}
+    if(!response.ok)throw new Error('poll');
+    const task=await response.json();
+    if(token!==generation)return null;
+    if(task.state==='ready')return Array.isArray(task.results)?task.results:[];
+    if(task.state==='failed')throw new Error(task.error||'upstream');
+    if(task.state==='cancelled')throw new Error('cancelled');
+    status.textContent=task.state==='queued'?'Búsqueda en cola…':'Consultando Radio Browser…';
+    await delay(400);
+  }
+  return null;
+}
+
+async function loadMore(){
+  if(busy||offset>180)return;
+  const token=generation;
+  busy=true;
+  more.disabled=true;
+  cancelButton.hidden=false;
+    status.textContent=offset?'Cargando más emisoras…':'Buscando…';
+  let createdId='';
+  try{
+    const url='/stations/search?filter='+encodeURIComponent(filter)+'&q='+encodeURIComponent(query)+'&codec='+encodeURIComponent(codec)+'&offset='+offset;
+    const response=await fetch(url,{cache:'no-store'});
+    if(response.status===401){window.location.replace('/');return}
+    if(!response.ok)throw new Error('enqueue');
+    const task=await response.json();
+    createdId=txt(task.id);
+    if(!createdId)throw new Error('job-id');
+    if(token!==generation){await cancelJob(createdId).catch(()=>{});return}
+    activeSearchId=createdId;
+    const stations=await pollSearch(createdId,token);
+    if(token!==generation||stations===null)return;
+    activeSearchId='';
+    cancelButton.hidden=true;
+
+    const savedResponse=await fetch('/stations/favorites',{cache:'no-store'});
+    if(savedResponse.status===401){window.location.replace('/');return}
+    if(!savedResponse.ok)throw new Error('favorites');
+    const saved=await savedResponse.json();
+    if(token!==generation)return;
+    const keys=new Set(saved.map(station=>txt(station.uuid)));
+    for(const station of stations){
+      results.append(row(station,keys.has(txt(station.stationuuid||station.uuid))));
+    }
+    offset+=stations.length;
+    more.hidden=stations.length<20||offset>180;
+    status.textContent=results.children.length+' radios '+(codec==='AAC'?'AAC/AAC+':'MP3')+(stations.length===20?' · hay más resultados':'');
+  }catch(error){
+    if(token===generation){
+      const id=activeSearchId||createdId;
+      activeSearchId='';
+      if(id)cancelJob(id).catch(()=>{});
+      more.hidden=offset===0;
+      cancelButton.hidden=true;
+      status.textContent=error.message==='cancelled'?'Búsqueda cancelada':'No se pudo consultar el catálogo. Intentá de nuevo.';
+    }
+  }finally{
+    if(token===generation){
+      busy=false;
+      more.disabled=false;
+      cancelButton.hidden=true;
+    }
+  }
+}
+
+function search(){
+  const selectedFilter=document.getElementById('filter').value;
+  const selectedQuery=document.getElementById('query').value.trim();
+   if(!selectedQuery){status.textContent='Escribí qué querés buscar.';return}
+  invalidateSearch();
+  filter=selectedFilter;
+  query=selectedQuery;
+  codec=document.getElementById('codec').value;
+  offset=0;
+  showingFavorites=false;
+  results.replaceChildren();
+  more.hidden=true;
+  loadMore();
+}
+
+async function favorites(){
+  invalidateSearch();
+  const token=generation;
+  showingFavorites=true;
+  more.hidden=true;
+  document.getElementById('search-panel').hidden=true;
+  status.textContent='Cargando favoritas…';
+  results.replaceChildren();
+  try{
+    const response=await fetch('/stations/favorites',{cache:'no-store'});
+    if(response.status===401){window.location.replace('/');return}
+    if(!response.ok)throw new Error('favorites');
+    const stations=await response.json();
+    if(token!==generation)return;
+    for(const station of stations)results.append(row(station,true));
+    status.textContent=stations.length?stations.length+' favoritas · usá ↑ y ↓ para ordenar':'Todavía no guardaste favoritas';
+  }catch(error){if(token===generation)status.textContent='No se pudieron leer las favoritas'}
+}
+
+document.getElementById('search').onclick=search;
+document.getElementById('query').onkeydown=event=>{if(event.key==='Enter')search()};
+more.onclick=loadMore;
+cancelButton.onclick=()=>invalidateSearch('Búsqueda cancelada');
+document.getElementById('search-tab').onclick=searchTab;
+document.getElementById('favorite-tab').onclick=favorites;
+document.getElementById('logout').onclick=async()=>{
+  try{
+    const csrf=await getCsrfToken();
+    const response=await fetch('/auth/logout',{method:'POST',headers:{'X-CSRF-Token':csrf}});
+    if(response.status===401){window.location.replace('/');return}
+    if(!response.ok)throw new Error('logout');
+    csrfToken='';
+    window.location.replace('/');
+  }catch(error){status.textContent='No se pudo cerrar la sesión. Intentá de nuevo'}
+};
+searchTab();
+</script></html>

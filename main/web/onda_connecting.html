@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang='es'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<meta charset='utf-8'>
+<title>Conectando ONDA</title>
+<body style='font:18px system-ui;background:#10141a;color:#eff4f8;padding:24px;max-width:520px;margin:0 auto'>
+<h2 id='title' style='color:#ffbf69'>Conectando…</h2>
+<p id='status' aria-live='polite'>ONDA está intentando conectarse a la red. Esta pantalla te avisará el resultado.</p>
+<p><a href='/' style='color:#ffbf69'>Volver a configurar</a></p>
+<script>
+const title=document.getElementById('title');
+const status=document.getElementById('status');
+const started=Date.now();
+const POLL_MS=2000;
+const SETTLE_MS=15000;
+
+/* Pure mapping from a /status payload plus elapsed time to the message to show.
+   Returns '' while a successful connection is still expected. */
+function connectingMessage(result,elapsedMs){
+  if(result.connected){
+    return 'ONDA se conectó a la red. Desconectá el teléfono de la red ONDA y volvé a tu Wi-Fi habitual: el portal local se cerrará solo.';
+  }
+  if(result.connect_error&&result.connect_error!=='ESP_OK'){
+    return 'No se pudo conectar a esa red. Revisá la contraseña o su disponibilidad y volvé a configurar Wi-Fi.';
+  }
+  if(elapsedMs<SETTLE_MS){
+    return '';
+  }
+  const security=result.security||'';
+  if(result.reason===201){
+    return 'No se encontró la red. Verificá alcance, que esté visible y que sea de 2,4 GHz. Seguridad detectada: '+security+'.';
+  }
+  if(result.reason===202||result.reason===15||result.reason===204){
+    return 'Falló la autenticación. Revisá la contraseña de la red. Seguridad detectada: '+security+'.';
+  }
+  if(result.reason===210||result.reason===211){
+    return 'El router rechazó el modo de seguridad negociado. Volvé a buscar la red para actualizar la seguridad detectada (código '+result.reason+').';
+  }
+  if(result.connecting){
+    return 'La radio sigue negociando la conexión ('+security+'). Todavía no recibió un rechazo del router.'+(result.reason?' Último motivo: '+result.reason+'.':'');
+  }
+  if(result.reason){
+    return 'La conexión se interrumpió. Motivo informado por el router: '+result.reason+'. Seguridad detectada: '+security+'.';
+  }
+  return 'No se recibió respuesta de conexión. Revisá que la red esté disponible y volvé a intentar.';
+}
+
+/* Updates the visible state. Returns true once the radio reports a connection,
+   so the caller can stop polling and let the phone leave the SoftAP. */
+function render(result){
+  const message=connectingMessage(result,Date.now()-started);
+  if(result.connected){
+    title.textContent='Listo';
+    title.style.color='#86e1bf';
+    status.textContent=message;
+    return true;
+  }
+  if(message){
+    title.textContent='No se pudo conectar';
+    title.style.color='#ff8f8f';
+    status.textContent=message;
+  }
+  return false;
+}
+
+async function check(){
+  try{
+    const response=await fetch('/status',{cache:'no-store'});
+    const result=await response.json();
+    if(render(result))return;
+  }catch(e){
+    status.textContent='Esperando el estado de la radio…';
+  }
+  setTimeout(check,POLL_MS);
+}
+check();
+</script>
+</body></html>
